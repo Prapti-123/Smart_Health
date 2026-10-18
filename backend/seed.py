@@ -1,4 +1,4 @@
-﻿"""
+"""
 seed.py - Deterministic seed for Smart Health DB
 30 centres x 60 days, realistic Chhattisgarh data with planted problems
 """
@@ -132,108 +132,125 @@ def build_stock_series(centre_idx: int, medicine: str, ctype: str):
     return result
 
 
-def main():
-    init_db()
-    db = SessionLocal()
-
-    try:
-        # Clear existing
+def seed_data(db, clear_existing=False):
+    if clear_existing:
         for model in [DailyStock, DailyFootfall, BedOccupancy, DoctorAttendance,
                       TestAvailability, Centre]:
             db.query(model).delete()
         db.commit()
 
-        centres = []
-        for i, (name, ctype, district, block, lat, lng, beds) in enumerate(CENTRES_DATA):
-            c = Centre(
-                name=name, centre_type=CentreType(ctype),
-                district=district, block=block,
-                latitude=lat, longitude=lng, bed_capacity=beds
-            )
-            db.add(c)
-            centres.append(c)
-        db.commit()
-        print(f"Inserted {len(centres)} centres")
+    centres = []
+    for i, (name, ctype, district, block, lat, lng, beds) in enumerate(CENTRES_DATA):
+        c = Centre(
+            name=name, centre_type=CentreType(ctype),
+            district=district, block=block,
+            latitude=lat, longitude=lng, bed_capacity=beds
+        )
+        db.add(c)
+        centres.append(c)
+    db.commit()
+    print(f"Inserted {len(centres)} centres")
 
-        for i, centre in enumerate(centres):
-            ctype = centre.centre_type.value
-            random.seed(SEED + centre.id)  # reproducible per-centre
+    for i, centre in enumerate(centres):
+        ctype = centre.centre_type.value
+        random.seed(SEED + centre.id)  # reproducible per-centre
 
-            # Pre-compute footfall series for the centre
-            footfall_series = [
-                (START_DATE + timedelta(days=d), generate_footfall(i, ctype, START_DATE + timedelta(days=d)))
-                for d in range(60)
-            ]
+        # Pre-compute footfall series for the centre
+        footfall_series = [
+            (START_DATE + timedelta(days=d), generate_footfall(i, ctype, START_DATE + timedelta(days=d)))
+            for d in range(60)
+        ]
 
-            # DailyFootfall
-            for (d, count) in footfall_series:
-                db.add(DailyFootfall(centre_id=centre.id, record_date=d, patient_count=count))
+        # DailyFootfall
+        for (d, count) in footfall_series:
+            db.add(DailyFootfall(centre_id=centre.id, record_date=d, patient_count=count))
 
-            # DailyStock per medicine
-            for medicine in MEDICINES:
-                series = build_stock_series(i, medicine, ctype)
-                for (d, stock, cons) in series:
-                    db.add(DailyStock(
-                        centre_id=centre.id, record_date=d,
-                        medicine=medicine, stock_qty=stock, consumption=cons
-                    ))
-
-            # BedOccupancy
-            capacity = centre.bed_capacity
-            for (d, footfall) in footfall_series:
-                if i in FULL_BED_CENTRES:
-                    occ_pct = random.uniform(0.88, 1.0)
-                else:
-                    occ_pct = random.uniform(0.3, 0.75)
-                occupied = min(capacity, int(capacity * occ_pct))
-                db.add(BedOccupancy(centre_id=centre.id, record_date=d, occupied=occupied))
-
-            # DoctorAttendance
-            posted = 2 if ctype == "CHC" else 1
-            for (d, _) in footfall_series:
-                if i in ABSENT_DOCTOR_CENTRES:
-                    absent_prob = 0.45
-                else:
-                    absent_prob = 0.08
-                present = posted
-                for _ in range(posted):
-                    if random.random() < absent_prob:
-                        present -= 1
-                present = max(0, present)
-                db.add(DoctorAttendance(
+        # DailyStock per medicine
+        for medicine in MEDICINES:
+            series = build_stock_series(i, medicine, ctype)
+            for (d, stock, cons) in series:
+                db.add(DailyStock(
                     centre_id=centre.id, record_date=d,
-                    doctors_posted=posted, doctors_present=present
+                    medicine=medicine, stock_qty=stock, consumption=cons
                 ))
 
-            # TestAvailability
-            for (d, _) in footfall_series:
-                avail = {
-                    "malaria_rdt": random.random() > (0.30 if i in STOCKOUT_CENTRES else 0.05),
-                    "blood_test":  random.random() > 0.05,
-                    "x_ray":       random.random() > (0.6 if ctype == "PHC" else 0.10),
-                    "hiv_kit":     random.random() > (0.35 if i in STOCKOUT_CENTRES else 0.08),
-                    "urine_test":  random.random() > 0.05,
-                }
-                db.add(TestAvailability(
-                    centre_id=centre.id, record_date=d, **avail
-                ))
+        # BedOccupancy
+        capacity = centre.bed_capacity
+        for (d, footfall) in footfall_series:
+            if i in FULL_BED_CENTRES:
+                occ_pct = random.uniform(0.88, 1.0)
+            else:
+                occ_pct = random.uniform(0.3, 0.75)
+            occupied = min(capacity, int(capacity * occ_pct))
+            db.add(BedOccupancy(centre_id=centre.id, record_date=d, occupied=occupied))
 
-            if i % 5 == 0:
-                db.commit()
-                print(f"  seeded {i+1}/{len(centres)} centres...")
+        # DoctorAttendance
+        posted = 2 if ctype == "CHC" else 1
+        for (d, _) in footfall_series:
+            if i in ABSENT_DOCTOR_CENTRES:
+                absent_prob = 0.45
+            else:
+                absent_prob = 0.08
+            present = posted
+            for _ in range(posted):
+                if random.random() < absent_prob:
+                    present -= 1
+            present = max(0, present)
+            db.add(DoctorAttendance(
+                centre_id=centre.id, record_date=d,
+                doctors_posted=posted, doctors_present=present
+            ))
 
-        db.commit()
-        print("Seed complete!")
+        # TestAvailability
+        for (d, _) in footfall_series:
+            avail = {
+                "malaria_rdt": random.random() > (0.30 if i in STOCKOUT_CENTRES else 0.05),
+                "blood_test":  random.random() > 0.05,
+                "x_ray":       random.random() > (0.6 if ctype == "PHC" else 0.10),
+                "hiv_kit":     random.random() > (0.35 if i in STOCKOUT_CENTRES else 0.08),
+                "urine_test":  random.random() > 0.05,
+            }
+            db.add(TestAvailability(
+                centre_id=centre.id, record_date=d, **avail
+            ))
 
-        # Quick sanity check
-        stock_count = db.query(DailyStock).count()
-        ff_count = db.query(DailyFootfall).count()
-        print(f"  DailyStock rows: {stock_count}")
-        print(f"  DailyFootfall rows: {ff_count}")
+        if i % 5 == 0:
+            db.commit()
+            print(f"  seeded {i+1}/{len(centres)} centres...")
 
+    db.commit()
+    print("Seed complete!")
+
+    # Quick sanity check
+    stock_count = db.query(DailyStock).count()
+    ff_count = db.query(DailyFootfall).count()
+    print(f"  DailyStock rows: {stock_count}")
+    print(f"  DailyFootfall rows: {ff_count}")
+
+
+def seed_if_empty():
+    init_db()
+    db = SessionLocal()
+    try:
+        count = db.query(Centre).count()
+        if count == 0:
+            print("Database is empty. Automatically seeding data...")
+            seed_data(db, clear_existing=False)
+        else:
+            print(f"Database already has {count} centres. Skipping auto-seed.")
+    finally:
+        db.close()
+
+
+def main():
+    init_db()
+    db = SessionLocal()
+    try:
+        seed_data(db, clear_existing=True)
     finally:
         db.close()
 
 
 if __name__ == "__main__":
     main()
+

@@ -1,4 +1,4 @@
-﻿gggg"""routers/centres.py"""
+"""routers/centres.py"""
 from datetime import date, timedelta
 from typing import List
 from fastapi import APIRouter, Depends

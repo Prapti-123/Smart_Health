@@ -1,4 +1,4 @@
-﻿# Smart Health – District Health Officer Platform
+# Smart Health – District Health Officer Platform
 
 A bilingual (English + Hindi) web platform for Chhattisgarh district health officers to manage PHCs and CHCs.
 
@@ -7,29 +7,57 @@ A bilingual (English + Hindi) web platform for Chhattisgarh district health offi
 
 ---
 
-## Quick Start
+## Single-Service Production Run (FastAPI serves React SPA)
+
+The application is configured as a single unified service: FastAPI serves the compiled React frontend (`frontend/dist`) as static files with SPA catch-all routing, and provides all `/api` endpoints. The SQLite database is automatically initialized and seeded on startup if empty.
+
+```bash
+# 1. Build frontend
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 2. Run backend (serves both API and UI)
+cd backend
+python -m pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+- App & Dashboard UI: **http://localhost:8000**
+- Health Check: **http://localhost:8000/api/health**
+- API Documentation (Swagger): **http://localhost:8000/docs**
+
+---
+
+## Render Deployment (Free Tier)
+
+A `render.yaml` configuration is included at the repository root for one-click deployment:
+
+- **Service Type:** Web Service
+- **Environment:** Python
+- **Build Command:** `pip install -r backend/requirements.txt`
+- **Start Command:** `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
+- **Automatic DB Seeding:** Handled by FastAPI lifespan on startup if the database is empty.
+
+---
+
+## Local Development (Optional Dual-Server)
 
 ### Backend
-
 ```bash
 cd backend
 python -m pip install -r requirements.txt
-python seed.py          # one-time: creates and seeds the database
-uvicorn main:app --reload
+uvicorn main:app --reload --port 8000
 ```
 
-API is available at: http://localhost:8000  
-Swagger docs: http://localhost:8000/docs
-
-### Frontend
-
+### Frontend (with Vite Hot-Reloading)
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-App is available at: http://localhost:5173
+(Vite proxies `/api` requests to `http://localhost:8000`)
 
 ---
 
@@ -37,11 +65,13 @@ App is available at: http://localhost:5173
 
 ```
 Smart_Health/
+├── render.yaml            # Render blueprint deployment config
+├── README.md
 ├── backend/
-│   ├── main.py            # FastAPI app
+│   ├── main.py            # FastAPI app (serves /api and frontend/dist SPA)
 │   ├── database.py        # SQLAlchemy models
-│   ├── seed.py            # Deterministic seed (30 centres × 60 days)
-│   ├── requirements.txt
+│   ├── seed.py            # Deterministic seed (30 centres × 60 days, auto-seed)
+│   ├── requirements.txt   # Pinned dependencies
 │   ├── logic/
 │   │   ├── forecasting.py     # ETS / moving-average forecast
 │   │   ├── redistribution.py  # Greedy haversine matching
@@ -55,30 +85,14 @@ Smart_Health/
 │   │   ├── summary.py    # GET /api/summary
 │   │   └── entry.py      # POST /api/entry
 │   └── tests/
-│       └── test_api.py
+│       └── test_api.py   # Pytest test suite (12 tests)
 └── frontend/
+    ├── dist/              # Production build served by FastAPI
     └── src/
         ├── pages/         # Overview, CentreDetail, Alerts, Redistribution, DataEntry
-        ├── components/    # Navbar, HealthMap, KPICard, SeverityBadge, …
-        └── i18n/          # en.json, hi.json
+        ├── components/    # Sidebar, Header, HealthMap, KPICard, SeverityBadge, …
+        └── i18n/          # en.json, hi.json (bilingual toggle)
 ```
-
----
-
-## Features
-
-| Feature | Detail |
-|---|---|
-| **30 Centres** | Real PHC/CHC names in Chhattisgarh with coordinates |
-| **60-day history** | Stock, footfall, beds, attendance, tests |
-| **Stock-out alerts** | Critical (<3 days), Warning (<7 days) |
-| **Demand forecast** | Holt ETS with 7-day MA fallback, returns `method` field |
-| **Redistribution** | Greedy haversine matching; donor retains ≥7 days stock |
-| **Performance flags** | Score 0-100 based on stock-outs, absence, beds, tests |
-| **District summary** | Template text in English and Hindi |
-| **Bilingual UI** | Full i18next en/hi toggle in navbar |
-| **Map** | CircleMarkers (red/amber/green), works without tiles |
-| **Data entry** | Daily form for PHC staff |
 
 ---
 
@@ -95,20 +109,13 @@ python -m pytest tests/test_api.py -v
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/centres` | All centres with status |
-| GET | `/api/centres/{id}` | Centre detail + 60-day history |
-| GET | `/api/stock/alerts` | Stock-out warnings |
+| GET | `/api/health` | Service health check |
+| GET | `/api/centres` | All centres with status and marker colors |
+| GET | `/api/centres/{id}` | Centre detail + 60-day historical time-series |
+| GET | `/api/stock/alerts` | Stock-out warnings sorted by severity |
 | POST | `/api/stock/entry` | Add stock record |
-| GET | `/api/forecast/{id}` | 14-day forecast |
-| GET | `/api/redistribution` | Transfer recommendations |
-| GET | `/api/flags` | Flagged/scored centres |
-| GET | `/api/summary` | District summary (en + hi) |
-| POST | `/api/entry` | Daily data entry form |
-
----
-
-## Data Notes
-
-- **Planted problems:** Centres 3, 8, 15, 20, 27 have chronic stock-outs; centres 4, 12, 21, 28 have high doctor absence; CHC centres 6, 9, 13, 17, 25 have full beds.
-- **Forecast method:** Simple/Holt ETS (no seasonality). Falls back to 7-day moving average if <14 data points or model fails. All forecasts clipped to ≥0.
-- **Redistribution safety:** Transfer quantity limited so donor retains ≥7 days cover post-transfer.
+| GET | `/api/forecast/{id}` | 14-day footfall & medicine demand forecast |
+| GET | `/api/redistribution` | Inter-facility transfer recommendations |
+| GET | `/api/flags` | Flagged underperforming centres with reasons |
+| GET | `/api/summary` | District executive summary (English and Hindi) |
+| POST | `/api/entry` | Daily operational data entry form |
